@@ -1,0 +1,11 @@
+{
+  "FIXED_DICT": {
+    "幕間": "まくあい",
+    "番外編": "ばんがいへん",
+    "閑話": "かんわ"
+  },
+  "SELECTORS": {
+    "subtitle": ".p-novel__title",
+    "honbun": ".js-novel-text"
+  }
+}

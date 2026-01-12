@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 220px; font-family: "Helvetica Neue", Arial, sans-serif; padding: 15px; background: #f9f9f9; }
+    h2 { font-size: 16px; color: #333; margin-top: 0; border-bottom: 2px solid #2196F3; }
+    .item { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; }
+    .label { font-size: 14px; font-weight: bold; }
+    .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 22px; }
+    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+    input:checked + .slider { background-color: #2196F3; }
+    input:checked + .slider:before { transform: translateX(22px); }
+    .note { font-size: 11px; color: #666; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>TSS Control</h2>
+  <div class="item">
+    <span class="label">連続再生モード</span>
+    <label class="switch">
+      <input type="checkbox" id="autoNext">
+      <span class="slider"></span>
+    </label>
+  </div>
+  <p class="note">※ONにすると読了後に自動で次話へ移動し再生します。</p>
+  <script src="popup.js"></script>
+</body>
+</html>
