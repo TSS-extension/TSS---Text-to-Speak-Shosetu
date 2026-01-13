@@ -3,6 +3,7 @@ const ncode = location.pathname.split('/')[1];
 let isPlaying = false;
 let config = null;
 let targetLines = [];
+let userSettings = { rate: 1.2, pitch: 1.0, volume: 1.0 }; // デフォルト値
 
 /**
  * 1. 漢数字変換（千の位まで・音変化対応）
@@ -20,11 +21,11 @@ function numberToJapaneseYomi(numStr) {
         if (d === 0) continue;
         let yomi = units[d];
         if (d === 1 && i > 0) yomi = ""; 
-        if (i === 2) { // 百の位の音変化
+        if (i === 2) {
             if (d === 3) { yomi = "さん"; pos = "びゃく"; }
             else if (d === 6) { yomi = "ろっ"; pos = "ぴゃく"; }
             else if (d === 8) { yomi = "はっ"; pos = "ぴゃく"; }
-        } else if (i === 3) { // 千の位の音変化
+        } else if (i === 3) {
             if (d === 3) { yomi = "さん"; pos = "ぜん"; }
             else if (d === 8) { yomi = "はっ"; pos = "せん"; }
         }
@@ -34,49 +35,53 @@ function numberToJapaneseYomi(numStr) {
 }
 
 /**
- * 2. 第n話の置換（「話」を消し去り「わ」に固定）
+ * 2. 第n話の置換
  */
 function replaceChapterNumbers(text) {
     let t = text.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    // 漢字の「第」と「話」をここで完全に平仮名へ変換する
-    return t.replace(/第(\d+)話/g, (m, p1) => {
-        return `だい ${numberToJapaneseYomi(p1)} わ。`;
-    });
+    return t.replace(/第(\d+)話/g, (m, p1) => `だい ${numberToJapaneseYomi(p1)} わ。`);
 }
 
 /**
- * 3. 1行を整形して送信（ここが最重要：漢字の「話」を抹殺）
+ * 3. 辞書適用と送信
  */
 function sendLineToTTS(el, index, isLast, dict, keys) {
     let text = el.innerText.trim();
     if (!text) return;
 
-    // A. 第n話を「だい...わ」に変換
     let processed = replaceChapterNumbers(text);
     
-    // B. 辞書適用（作品別・固定辞書）
+    // 辞書適用
     keys.forEach(key => {
         processed = processed.split(key).join(dict[key]);
     });
 
-    // C. 【徹底防御】文中に残った単独の「話」をすべて「わ」に変換
-    // これにより、TTSが「はなし」と読む余地をゼロにする
+    // 「話」の誤読防止
     processed = processed.replace(/話/g, "わ");
 
     chrome.runtime.sendMessage({ 
         action: "speak", 
         text: processed, 
         index: index, 
-        isLast: isLast 
+        isLast: isLast,
+        settings: userSettings // 設定サイトで保存した値を渡す
     });
 }
 
 /**
- * 4. 読み上げ開始
+ * 4. 読み上げ開始（ローカル辞書・設定をロード）
  */
 async function startReading() {
     if (!config) await loadConfig();
+
+    // ローカルストレージから「設定」と「この作品のローカル辞書」を取得
+    const storageData = await chrome.storage.local.get(['user_settings', ncode, 'common_dict']);
     
+    // 設定の更新
+    if (storageData.user_settings) {
+        userSettings = storageData.user_settings;
+    }
+
     const subtitle = document.querySelector(config.SELECTORS.subtitle);
     const lines = Array.from(document.querySelectorAll('p[id^="L"]')).filter(el => el.innerText.trim().length > 0);
     
@@ -85,11 +90,12 @@ async function startReading() {
 
     updateUI(true);
 
-    const [localRes, commonRes] = await Promise.all([
-        chrome.storage.local.get(ncode),
-        chrome.storage.local.get('common_dict')
-    ]);
-    const combinedDict = { ...(commonRes.common_dict || {}), ...config.FIXED_DICT, ...(localRes[ncode] || {}) };
+    // 辞書の統合（優先順位：作品別ローカル > 共通 > 固定）
+    const combinedDict = { 
+        ...(storageData.common_dict || {}), 
+        ...config.FIXED_DICT, 
+        ...(storageData[ncode] || {}) 
+    };
     const sortedKeys = Object.keys(combinedDict).sort((a, b) => b.length - a.length);
 
     targetLines.forEach((el, index) => {
@@ -98,7 +104,7 @@ async function startReading() {
 }
 
 /**
- * 5. UI管理 & ハイライト
+ * 5. UI管理
  */
 function updateUI(playing) {
     isPlaying = playing;
@@ -124,7 +130,6 @@ function highlightLine(index) {
     }
 }
 
-// 初期設定読み込み
 async function loadConfig() {
     try {
         const url = chrome.runtime.getURL('dictionary.json');
@@ -135,7 +140,6 @@ async function loadConfig() {
     }
 }
 
-// ボタン生成
 function createPlayButton() {
     if (document.getElementById('tss-play-button')) return;
     const btn = document.createElement('button');
@@ -146,7 +150,7 @@ function createPlayButton() {
     updateUI(false);
 }
 
-// イベントリスナー
+// メッセージ待機（行完了通知）
 chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === "lineCompleted") {
         highlightLine(msg.index + 1);
@@ -154,11 +158,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     }
 });
 
-// 起動
+// 初期化
 (async () => {
     await loadConfig();
     createPlayButton();
-    // ルビ学習（既存のロジック）
+
+    // 既存のルビ学習（ローカル辞書への自動登録）
     const data = await chrome.storage.local.get(ncode);
     let dict = data[ncode] || {};
     let updated = false;

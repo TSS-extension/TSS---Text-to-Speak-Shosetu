@@ -1,11 +1,15 @@
 {
   "manifest_version": 3,
   "name": "なろう読み上げ辞書分離版",
-  "version": "1.0",
+  "version": "1.1",
   "permissions": ["tts", "storage", "tabs"],
   "background": {
     "service_worker": "background.js"
   },
+  "action": {
+    "default_title": "設定を開く"
+  },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": ["https://ncode.syosetu.com/*"],
