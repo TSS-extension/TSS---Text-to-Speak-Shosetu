@@ -1,13 +1,41 @@
-// options.js - V1.1 完全版 (重複チェック・タブ切り替え・辞書管理統合)
+// options.js - V1.2 OSS Final Complete Version
+// 統合機能: プリセット(デフォルト重複防止・ホバー表示・検索連動), 辞書(検索・入出力), 自動再生
 
-// --- 設定項目の定義 ---
 const configs = [
     { range: 'rateRange', num: 'rateNum', key: 'rate', def: 1.2 },
     { range: 'pitchRange', num: 'pitchNum', key: 'pitch', def: 1.0 },
     { range: 'volRange', num: 'volNum', key: 'volume', def: 1.0 }
 ];
 
-// --- 1. タブ切り替えロジック ---
+const DEFAULT_DATA = { rate: 1.2, pitch: 1.0, volume: 1.0 };
+
+// --- 1. 初期化処理 ---
+document.addEventListener('DOMContentLoaded', () => {
+    chrome.storage.local.get(['user_settings', 'presets', 'auto_play_enabled'], (data) => {
+        // 設定値の反映
+        if (data.user_settings) {
+            applyValues(data.user_settings);
+        }
+        // カスタムプリセットの描画
+        if (data.presets) {
+            renderPresets(data.presets);
+        }
+        // 自動再生チェックボックス
+        if (document.getElementById('autoPlay')) {
+            document.getElementById('autoPlay').checked = !!data.auto_play_enabled;
+        }
+        
+        // デフォルトボタンのツールチップ設定
+        const defBtn = document.getElementById('p-default');
+        if (defBtn) {
+            defBtn.title = getSettingsTooltip(DEFAULT_DATA);
+            defBtn.onclick = () => applyValues(DEFAULT_DATA);
+        }
+    });
+    refreshDicTable();
+});
+
+// --- 2. タブ切り替え ---
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = () => {
         document.querySelectorAll('.tab-btn, .content-section').forEach(el => el.classList.remove('active'));
@@ -16,179 +44,218 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     };
 });
 
-// --- 2. 初期化処理 (データロード) ---
-document.addEventListener('DOMContentLoaded', () => {
-    // 保存済み設定とプリセットの反映
-    chrome.storage.local.get(['user_settings', 'presets'], (data) => {
-        if (data.user_settings) {
-            applyValues(data.user_settings);
-        } else {
-            // 初回起動時はデフォルト値を適用
-            applyValues({rate: 1.2, pitch: 1.0, volume: 1.0});
-        }
-        renderPresets(data.presets || []);
-    });
-    // 辞書テーブルの更新
-    refreshDicTable();
+// --- 3. スライダー & 数値入力の同期 ---
+configs.forEach(c => {
+    const rangeEl = document.getElementById(c.range);
+    const numEl = document.getElementById(c.num);
+    if (rangeEl && numEl) {
+        rangeEl.oninput = () => { numEl.value = rangeEl.value; };
+        numEl.oninput = () => {
+            let val = parseFloat(numEl.value);
+            if (val > 10.0) val = 10.0;
+            if (val < 0.1) val = 0.1;
+            rangeEl.value = val > 3.0 ? 3.0 : val;
+        };
+    }
 });
 
-// 画面上の入力欄に値をセットする共通関数
-function applyValues(s) {
-    document.getElementById('rateNum').value = s.rate;
-    // スライダーは最大3.0までの表示制限（数値入力は10まで可）
-    document.getElementById('rateRange').value = s.rate > 3 ? 3 : s.rate;
-    document.getElementById('pitchNum').value = s.pitch;
-    document.getElementById('pitchRange').value = s.pitch;
-    document.getElementById('volNum').value = s.volume;
-    document.getElementById('volRange').value = s.volume;
+function applyValues(settings) {
+    configs.forEach(c => {
+        const val = settings[c.key] || c.def;
+        const numEl = document.getElementById(c.num);
+        const rangeEl = document.getElementById(c.range);
+        if (numEl) numEl.value = val;
+        if (rangeEl) rangeEl.value = (val > 3.0) ? 3.0 : val;
+    });
 }
 
-// --- 3. スライダーと数値入力の双方向同期 ---
-configs.forEach(c => {
-    const r = document.getElementById(c.range);
-    const n = document.getElementById(c.num);
-    
-    r.oninput = () => { n.value = r.value; };
-    n.oninput = () => {
-        let v = Math.round(parseFloat(n.value) * 10) / 10;
-        if (!isNaN(v)) r.value = v > 3 ? 3 : v;
-    };
-});
+// --- 4. プリセット機能 (完全重複防止・検索連動・ホバー表示) ---
 
-// --- 4. プリセット機能 (重複防止ロジック搭載) ---
+function getSettingsTooltip(p) {
+    return `速度: ${parseFloat(p.rate).toFixed(1)} / ピッチ: ${parseFloat(p.pitch).toFixed(1)} / 音量: ${parseFloat(p.volume).toFixed(1)}`;
+}
 
-// デフォルトボタン
-document.getElementById('p-default').onclick = () => applyValues({rate: 1.2, pitch: 1.0, volume: 1.0});
+// 検索ボックス：辞書だけでなくプリセットボタンもフィルタリング
+const dicSearch = document.getElementById('dicSearch');
+if (dicSearch) {
+    dicSearch.addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase();
+        
+        // デフォルトボタンの検索
+        const defBtn = document.getElementById('p-default');
+        if (defBtn) {
+            const isMatch = "デフォルト".includes(query) || "default".includes(query) || defBtn.title.toLowerCase().includes(query);
+            defBtn.style.display = isMatch ? "" : "none";
+        }
+        
+        // カスタムプリセットボタンの検索
+        document.querySelectorAll('#p-custom-list .p-btn').forEach(btn => {
+            const isMatch = btn.innerText.toLowerCase().includes(query) || btn.title.toLowerCase().includes(query);
+            btn.style.display = isMatch ? "" : "none";
+        });
 
-// プリセットの追加
+        // 辞書テーブルの更新
+        refreshDicTable(query);
+    });
+}
+
 document.getElementById('p-add').onclick = () => {
-    const current = {
-        rate: parseFloat(document.getElementById('rateNum').value) || 1.2,
-        pitch: parseFloat(document.getElementById('pitchNum').value) || 1.0,
-        volume: parseFloat(document.getElementById('volNum').value) || 1.0
-    };
+    const rate = parseFloat(document.getElementById('rateNum').value);
+    const pitch = parseFloat(document.getElementById('pitchNum').value);
+    const volume = parseFloat(document.getElementById('volNum').value);
 
-    chrome.storage.local.get('presets', data => {
-        const list = data.presets || [];
+    // デフォルト設定と同じ値かどうかチェック
+    if (rate === DEFAULT_DATA.rate && pitch === DEFAULT_DATA.pitch && volume === DEFAULT_DATA.volume) {
+        alert("デフォルト設定と同じ値のため、新規保存は不要です。");
+        return;
+    }
 
-        // 数値設定の重複チェック
-        const isDuplicateValue = list.some(p => 
-            p.rate === current.rate && 
-            p.pitch === current.pitch && 
-            p.volume === current.volume
-        );
-
+    chrome.storage.local.get('presets', (data) => {
+        const presets = data.presets || [];
+        
+        // 既存のカスタムプリセットと値が重複していないかチェック
+        const isDuplicateValue = presets.some(p => p.rate === rate && p.pitch === pitch && p.volume === volume);
         if (isDuplicateValue) {
-            alert("同じ設定のプリセットが既に存在します。");
+            alert("この設定値のプリセットは既に存在します。");
             return;
         }
 
-        const name = prompt("プリセット名を入力してください:", "カスタム設定");
-        if (!name || name.trim() === "") return;
+        const name = prompt("プリセット名を入力してください:");
+        if (!name) return;
 
-        // 名前の重複チェック
-        const isDuplicateName = list.some(p => p.name === name.trim());
-        if (isDuplicateName) {
-            alert("その名前は既に使用されています。");
+        // 名前が重複していないかチェック
+        if (presets.some(p => p.name === name)) {
+            alert("同じ名前のプリセットが既に存在します。");
             return;
         }
 
-        current.name = name.trim();
-        list.push(current);
-        chrome.storage.local.set({presets: list}, () => renderPresets(list));
+        presets.push({ name, rate, pitch, volume });
+        chrome.storage.local.set({ presets }, () => renderPresets(presets));
     });
 };
 
-// プリセットボタンの描画
 function renderPresets(list) {
     const container = document.getElementById('p-custom-list');
+    if (!container) return;
     container.innerHTML = '';
-    list.forEach((p, i) => {
+    list.forEach((p, index) => {
         const btn = document.createElement('button');
         btn.className = 'p-btn p-btn-custom';
         btn.innerText = p.name;
-        btn.title = `速度:${p.rate} 高音:${p.pitch} 音量:${p.volume}`;
-        
+        btn.title = getSettingsTooltip(p); // ホバー時にステータス表示
         btn.onclick = () => applyValues(p);
         
         // 右クリックで削除
         btn.oncontextmenu = (e) => {
             e.preventDefault();
             if (confirm(`プリセット「${p.name}」を削除しますか？`)) {
-                list.splice(i, 1);
-                chrome.storage.local.set({presets: list}, () => renderPresets(list));
+                list.splice(index, 1);
+                chrome.storage.local.set({ presets: list }, () => renderPresets(list));
             }
         };
         container.appendChild(btn);
     });
 }
 
-// --- 5. 設定保存 (メイン) ---
-document.getElementById('saveBtn').onclick = () => {
-    const s = {
-        rate: Math.min(Math.max(parseFloat(document.getElementById('rateNum').value), 0.1), 10.0),
-        pitch: Math.min(Math.max(parseFloat(document.getElementById('pitchNum').value), 0.1), 2.0),
-        volume: Math.min(Math.max(parseFloat(document.getElementById('volNum').value), 0.1), 1.0)
-    };
-    
-    chrome.storage.local.set({ user_settings: s }, () => {
-        const btn = document.getElementById('saveBtn');
-        btn.innerText = "保存しました！";
-        btn.style.backgroundColor = "#4CAF50";
-        setTimeout(() => window.close(), 700);
-    });
-};
+// --- 5. 辞書管理 ---
+async function refreshDicTable(filter = "") {
+    const data = await chrome.storage.local.get('common_dict');
+    const dict = data.common_dict || {};
+    const body = document.getElementById('dicTableBody');
+    if (!body) return;
+    body.innerHTML = '';
 
-// --- 6. 辞書管理ロジック ---
-
-function refreshDicTable() {
-    chrome.storage.local.get('common_dict', data => {
-        const dict = data.common_dict || {};
-        const body = document.getElementById('dicTableBody');
-        body.innerHTML = '';
+    Object.keys(dict).sort().forEach(k => {
+        if (filter && !k.toLowerCase().includes(filter) && !dict[k].toLowerCase().includes(filter)) return;
         
-        // 単語を辞書順に並べて表示
-        Object.keys(dict).sort().forEach(k => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${k}</td>
-                <td>${dict[k]}</td>
-                <td><button class="btn-del" data-key="${k}">削除</button></td>
-            `;
-            body.appendChild(tr);
-        });
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${k}</td>
+            <td>${dict[k]}</td>
+            <td><button class="btn-del" data-key="${k}">削除</button></td>
+        `;
+        body.appendChild(tr);
+    });
 
-        // 削除ボタンのイベント紐付け
-        document.querySelectorAll('.btn-del').forEach(b => {
-            b.onclick = () => {
-                const key = b.dataset.key;
-                chrome.storage.local.get('common_dict', d => {
-                    const newDict = d.common_dict || {};
-                    delete newDict[key];
-                    chrome.storage.local.set({common_dict: newDict}, refreshDicTable);
-                });
-            };
-        });
+    body.querySelectorAll('.btn-del').forEach(btn => {
+        btn.onclick = async () => {
+            const res = await chrome.storage.local.get('common_dict');
+            const newDict = res.common_dict || {};
+            delete newDict[btn.dataset.key];
+            await chrome.storage.local.set({ common_dict: newDict });
+            refreshDicTable(dicSearch?.value || "");
+        };
     });
 }
 
-// 辞書への追加
-document.getElementById('addDicBtn').onclick = () => {
-    const k = document.getElementById('dicKanji').value.trim();
-    const y = document.getElementById('dicYomi').value.trim();
-    
-    if (!k || !y) {
-        alert("単語と読みを入力してください。");
-        return;
-    }
+document.getElementById('addDicBtn').onclick = async () => {
+    const kEl = document.getElementById('dicKanji');
+    const yEl = document.getElementById('dicYomi');
+    const kanji = kEl.value.trim();
+    const yomi = yEl.value.trim();
 
-    chrome.storage.local.get('common_dict', data => {
-        const dict = data.common_dict || {};
-        dict[k] = y;
-        chrome.storage.local.set({common_dict: dict}, () => {
-            document.getElementById('dicKanji').value = '';
-            document.getElementById('dicYomi').value = '';
-            refreshDicTable();
-        });
+    if (!kanji || !yomi) return;
+
+    const data = await chrome.storage.local.get('common_dict');
+    const dict = { ...(data.common_dict || {}), [kanji]: yomi };
+    await chrome.storage.local.set({ common_dict: dict });
+    
+    kEl.value = ''; 
+    yEl.value = '';
+    refreshDicTable(dicSearch?.value || "");
+};
+
+// --- 6. バックアップ機能 (Export / Import) ---
+document.getElementById('exportDic')?.addEventListener('click', async () => {
+    const data = await chrome.storage.local.get('common_dict');
+    const blob = new Blob([JSON.stringify(data.common_dict || {}, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tss_dictionary_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+document.getElementById('importDic')?.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            try {
+                const imported = JSON.parse(ev.target.result);
+                const data = await chrome.storage.local.get('common_dict');
+                const merged = { ...(data.common_dict || {}), ...imported };
+                await chrome.storage.local.set({ common_dict: merged });
+                alert("辞書をインポートしました。");
+                refreshDicTable();
+            } catch (err) {
+                alert("インポートに失敗しました。ファイル形式を確認してください。");
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+});
+
+// --- 7. 保存処理 ---
+document.getElementById('saveBtn').onclick = () => {
+    const settings = {
+        rate: parseFloat(document.getElementById('rateNum').value),
+        pitch: parseFloat(document.getElementById('pitchNum').value),
+        volume: parseFloat(document.getElementById('volNum').value)
+    };
+    const autoPlay = document.getElementById('autoPlay')?.checked || false;
+
+    chrome.storage.local.set({ 
+        user_settings: settings,
+        auto_play_enabled: autoPlay
+    }, () => {
+        alert("設定を保存しました。");
+        window.close();
     });
 };

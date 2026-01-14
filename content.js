@@ -1,176 +1,123 @@
-// content.js
+// content.js - V1.2 (Stability + New Features)
 const ncode = location.pathname.split('/')[1];
-let isPlaying = false;
-let config = null;
-let targetLines = [];
-let userSettings = { rate: 1.2, pitch: 1.0, volume: 1.0 }; // デフォルト値
+let isPlaying = false, isPaused = false, currentIdx = 0, config = null, targetLines = [];
 
-/**
- * 1. 漢数字変換（千の位まで・音変化対応）
- */
-function numberToJapaneseYomi(numStr) {
-    const n = parseInt(numStr, 10);
-    if (isNaN(n) || n === 0) return n === 0 ? "ぜろ" : numStr;
-    const units = ["", "いち", "に", "さん", "よん", "ご", "ろく", "なな", "はち", "きゅう"];
-    const positions = ["", "じゅう", "ひゃく", "せん"];
-    let result = "";
-    let digits = n.toString().split('').map(Number).reverse();
-    for (let i = 0; i < digits.length; i++) {
-        let d = digits[i];
-        let pos = positions[i];
-        if (d === 0) continue;
-        let yomi = units[d];
-        if (d === 1 && i > 0) yomi = ""; 
-        if (i === 2) {
-            if (d === 3) { yomi = "さん"; pos = "びゃく"; }
-            else if (d === 6) { yomi = "ろっ"; pos = "ぴゃく"; }
-            else if (d === 8) { yomi = "はっ"; pos = "ぴゃく"; }
-        } else if (i === 3) {
-            if (d === 3) { yomi = "さん"; pos = "ぜん"; }
-            else if (d === 8) { yomi = "はっ"; pos = "せん"; }
-        }
-        result = yomi + pos + result;
-    }
-    return result;
-}
+// --- 1. キーボード操作 (行スキップ・ポーズ) ---
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+    if (e.code === 'ArrowRight') { e.preventDefault(); jumpTo(currentIdx + 1); }
+    if (e.code === 'ArrowLeft') { e.preventDefault(); jumpTo(currentIdx - 1); }
+});
 
-/**
- * 2. 第n話の置換
- */
-function replaceChapterNumbers(text) {
-    let t = text.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    return t.replace(/第(\d+)話/g, (m, p1) => `だい ${numberToJapaneseYomi(p1)} わ。`);
-}
-
-/**
- * 3. 辞書適用と送信
- */
-function sendLineToTTS(el, index, isLast, dict, keys) {
-    let text = el.innerText.trim();
-    if (!text) return;
-
-    let processed = replaceChapterNumbers(text);
-    
-    // 辞書適用
-    keys.forEach(key => {
-        processed = processed.split(key).join(dict[key]);
-    });
-
-    // 「話」の誤読防止
-    processed = processed.replace(/話/g, "わ");
-
-    chrome.runtime.sendMessage({ 
-        action: "speak", 
-        text: processed, 
-        index: index, 
-        isLast: isLast,
-        settings: userSettings // 設定サイトで保存した値を渡す
-    });
-}
-
-/**
- * 4. 読み上げ開始（ローカル辞書・設定をロード）
- */
-async function startReading() {
-    if (!config) await loadConfig();
-
-    // ローカルストレージから「設定」と「この作品のローカル辞書」を取得
-    const storageData = await chrome.storage.local.get(['user_settings', ncode, 'common_dict']);
-    
-    // 設定の更新
-    if (storageData.user_settings) {
-        userSettings = storageData.user_settings;
-    }
-
-    const subtitle = document.querySelector(config.SELECTORS.subtitle);
-    const lines = Array.from(document.querySelectorAll('p[id^="L"]')).filter(el => el.innerText.trim().length > 0);
-    
-    targetLines = subtitle ? [subtitle, ...lines] : lines;
-    if (targetLines.length === 0) return;
-
-    updateUI(true);
-
-    // 辞書の統合（優先順位：作品別ローカル > 共通 > 固定）
-    const combinedDict = { 
-        ...(storageData.common_dict || {}), 
-        ...config.FIXED_DICT, 
-        ...(storageData[ncode] || {}) 
-    };
-    const sortedKeys = Object.keys(combinedDict).sort((a, b) => b.length - a.length);
-
-    targetLines.forEach((el, index) => {
-        sendLineToTTS(el, index, index === targetLines.length - 1, combinedDict, sortedKeys);
-    });
-}
-
-/**
- * 5. UI管理
- */
-function updateUI(playing) {
+// --- 2. UI制御 (ポーズボタン対応) ---
+function updateUI(playing, paused = false) {
     isPlaying = playing;
+    isPaused = paused;
     const btn = document.getElementById('tss-play-button');
     if (btn) {
-        btn.innerText = playing ? "■ 停止" : "▶ TSS再生開始";
-        btn.style.backgroundColor = playing ? "#f44336" : "#2196F3";
+        if (!playing) {
+            btn.innerText = "▶ TSS再生開始";
+            btn.style.backgroundColor = "#2196F3";
+        } else if (paused) {
+            btn.innerText = "⏵ 再開";
+            btn.style.backgroundColor = "#4CAF50";
+        } else {
+            btn.innerText = "⏸ 一時停止";
+            btn.style.backgroundColor = "#f44336";
+        }
     }
-    if (!playing) clearAllHighlights();
+    if (!playing) clearHighlights();
 }
 
-function clearAllHighlights() {
-    targetLines.forEach(el => { if (el) el.style.backgroundColor = "transparent"; });
+function createController() {
+    if (document.getElementById('tss-controller')) return;
+    const container = document.createElement('div');
+    container.id = "tts-controller";
+    container.style = "position:fixed; bottom:20px; right:20px; z-index:2147483647;";
+    container.innerHTML = `<button id="tss-play-button" style="color:white; background-color:#2196F3; border:none; padding:12px 24px; border-radius:4px; cursor:pointer; font-size:16px; font-weight:bold; box-shadow:0 4px 10px rgba(0,0,0,0.3);">▶ TSS再生開始</button>`;
+    document.body.appendChild(container);
+    document.getElementById('tss-play-button').onclick = togglePlay;
 }
 
-function highlightLine(index) {
-    clearAllHighlights();
-    if (targetLines[index]) {
-        const el = targetLines[index];
-        el.style.backgroundColor = "#fff9c4";
-        el.style.transition = "background-color 0.2s";
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+// --- 3. 再生ロジック (自動再生・一時停止対応) ---
+async function startReading(startIndex = 0) {
+    if (!config) await loadConfig();
+    const data = await chrome.storage.local.get(['user_settings', ncode, 'common_dict']);
+    const settings = data.user_settings || { rate: 1.2, pitch: 1.0, volume: 1.0 };
+
+    const lines = Array.from(document.querySelectorAll('p[id^="L"]')).filter(el => el.innerText.trim().length > 0);
+    const subtitle = document.querySelector(config.SELECTORS?.subtitle);
+    targetLines = subtitle ? [subtitle, ...lines] : lines;
+    
+    if (targetLines.length === 0) return;
+    currentIdx = startIndex;
+    updateUI(true, false);
+
+    const dict = { ...(data.common_dict || {}), ...config.FIXED_DICT, ...(data[ncode] || {}) };
+    const keys = Object.keys(dict).sort((a, b) => b.length - a.length);
+
+    for (let i = startIndex; i < targetLines.length; i++) {
+        let txt = targetLines[i].innerText.trim();
+        txt = txt.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+        keys.forEach(k => txt = txt.split(k).join(dict[k]));
+        chrome.runtime.sendMessage({ action: "speak", text: txt, index: i, isLast: i === targetLines.length - 1, settings });
+    }
+    highlightLine(startIndex);
+}
+
+function togglePlay() {
+    if (!isPlaying) {
+        startReading(currentIdx);
+    } else if (!isPaused) {
+        chrome.runtime.sendMessage({ action: "pause" });
+        updateUI(true, true);
+    } else {
+        chrome.runtime.sendMessage({ action: "resume" });
+        updateUI(true, false);
+    }
+}
+
+function stopReading() {
+    chrome.runtime.sendMessage({ action: "stop" });
+    updateUI(false);
+}
+
+function jumpTo(idx) {
+    if (idx >= 0 && idx < targetLines.length) {
+        stopReading();
+        startReading(idx);
     }
 }
 
 async function loadConfig() {
     try {
-        const url = chrome.runtime.getURL('dictionary.json');
-        const response = await fetch(url);
+        const response = await fetch(chrome.runtime.getURL('dictionary.json'));
         config = await response.json();
-    } catch (e) {
-        config = { SELECTORS: { subtitle: ".p-novel__title", honbun: ".js-novel-text" }, FIXED_DICT: {} };
+    } catch (e) { config = { SELECTORS: { subtitle: ".p-novel__title" }, FIXED_DICT: {} }; }
+}
+
+function highlightLine(idx) {
+    clearHighlights();
+    if (targetLines[idx]) {
+        targetLines[idx].style.backgroundColor = "#fff9c4";
+        targetLines[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 }
+function clearHighlights() { targetLines.forEach(el => { if(el) el.style.backgroundColor = "transparent"; }); }
 
-function createPlayButton() {
-    if (document.getElementById('tss-play-button')) return;
-    const btn = document.createElement('button');
-    btn.id = "tss-play-button";
-    btn.style = "position:fixed; bottom:20px; right:20px; z-index:2147483647; padding:15px 25px; border:none; border-radius:50px; cursor:pointer; font-weight:bold; color:white; box-shadow:0 4px 10px rgba(0,0,0,0.3); font-size:16px;";
-    document.body.appendChild(btn);
-    btn.onclick = () => isPlaying ? (chrome.runtime.sendMessage({action:"stop"}), updateUI(false)) : startReading();
-    updateUI(false);
-}
-
-// メッセージ待機（行完了通知）
-chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.action === "lineCompleted") {
-        highlightLine(msg.index + 1);
-        if (msg.isLast) updateUI(false);
+chrome.runtime.onMessage.addListener((m) => {
+    if (m.action === "lineCompleted") {
+        currentIdx = m.index + 1;
+        highlightLine(currentIdx);
+        if (m.isLast) stopReading();
     }
 });
 
-// 初期化
+// 初期化（自動再生対応）
 (async () => {
     await loadConfig();
-    createPlayButton();
-
-    // 既存のルビ学習（ローカル辞書への自動登録）
-    const data = await chrome.storage.local.get(ncode);
-    let dict = data[ncode] || {};
-    let updated = false;
-    document.querySelectorAll('ruby').forEach(r => {
-        const k = r.childNodes[0]?.textContent?.trim();
-        const y = r.querySelector('rt')?.textContent?.trim();
-        if (k && y && dict[k] !== y) { dict[k] = y; updated = true; }
-    });
-    if (updated) await chrome.storage.local.set({ [ncode]: dict });
+    createController();
+    const data = await chrome.storage.local.get('auto_play_enabled');
+    if (data.auto_play_enabled) setTimeout(() => startReading(0), 1000);
 })();
