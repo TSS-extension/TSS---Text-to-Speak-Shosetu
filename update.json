@@ -1,5 +1,5 @@
 {
-  "version": "1.2.0",
+  "version": "1.1.0",
   "description": "V1.2 統合アップデート：再生コントロールUI修正、キーボード操作、自動再生、辞書検索・バックアップ機能、およびGitHub自動更新システムの導入",
   "update_files": [
     "manifest.json",
