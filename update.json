@@ -1,0 +1,12 @@
+{
+  "version": "1.2.0",
+  "description": "V1.2 統合アップデート：再生コントロールUI修正、キーボード操作、自動再生、辞書検索・バックアップ機能、およびGitHub自動更新システムの導入",
+  "update_files": [
+    "manifest.json",
+    "content.js",
+    "background.js",
+    "options.html",
+    "options.js",
+    "dictionary.json"
+  ]
+}
