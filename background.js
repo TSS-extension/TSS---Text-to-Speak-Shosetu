@@ -45,3 +45,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "pause") chrome.tts.pause();
     if (request.action === "resume") chrome.tts.resume();
 });
+// --- Update Checker ---
+const GITHUB_MANIFEST = "https://raw.githubusercontent.com/TSS-extension/TSS---Text-to-Speak-Shosetu/main/manifest.json";
+const UPDATE_CHECK_ALARM = "check_updates";
+
+chrome.alarms.create(UPDATE_CHECK_ALARM, { periodInMinutes: 360 }); // 6 hours
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === UPDATE_CHECK_ALARM) {
+        checkForUpdates();
+    }
+});
+
+chrome.runtime.onStartup.addListener(checkForUpdates);
+chrome.runtime.onInstalled.addListener(checkForUpdates);
+
+async function checkForUpdates() {
+    try {
+        const local = chrome.runtime.getManifest().version;
+        const res = await fetch(GITHUB_MANIFEST);
+        if (!res.ok) throw new Error("Network error");
+
+        const data = await res.json();
+        const remote = data.version;
+
+        if (isNewer(remote, local)) {
+            chrome.action.setBadgeText({ text: "NEW" });
+            chrome.action.setBadgeBackgroundColor({ color: "#ff5252" });
+            chrome.storage.local.set({
+                update_available: true,
+                latest_version: remote
+            });
+        } else {
+            chrome.action.setBadgeText({ text: "" });
+            chrome.storage.local.remove(['update_available']);
+        }
+    } catch (e) {
+        console.log("Update check failed:", e);
+    }
+}
+
+function isNewer(remote, local) {
+    const r = remote.split('.').map(Number);
+    const l = local.split('.').map(Number);
+    for (let i = 0; i < Math.max(r.length, l.length); i++) {
+        const rv = r[i] || 0;
+        const lv = l[i] || 0;
+        if (rv > lv) return true;
+        if (rv < lv) return false;
+    }
+    return false;
+}

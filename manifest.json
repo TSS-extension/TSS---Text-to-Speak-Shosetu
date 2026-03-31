@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "なろう読み上げ辞書分離版",
-  "version": "1.3",
-  "permissions": ["tts", "storage", "contextMenus", "activeTab"],
+  "version": "1.4",
+  "permissions": [
+    "tts",
+    "storage",
+    "contextMenus",
+    "activeTab",
+    "alarms"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -12,14 +18,22 @@
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://ncode.syosetu.com/*"],
-      "js": ["content.js"]
+      "matches": [
+        "https://ncode.syosetu.com/*"
+      ],
+      "js": [
+        "content.js"
+      ]
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["dictionary.json"],
-      "matches": ["https://ncode.syosetu.com/*"]
+      "resources": [
+        "dictionary.json"
+      ],
+      "matches": [
+        "https://ncode.syosetu.com/*"
+      ]
     }
   ]
 }

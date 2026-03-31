@@ -259,3 +259,70 @@ document.getElementById('saveBtn').onclick = () => {
         window.close();
     });
 };
+// --- 8. 繧｢繝・・繝・・繝育｢ｺ隱阪す繧ｹ繝・Β ---
+document.addEventListener('DOMContentLoaded', async () => {
+    // 迴ｾ蝨ｨ縺ｮ繝舌・繧ｸ繝ｧ繝ｳ陦ｨ遉ｺ
+    const ver = chrome.runtime.getManifest().version;
+    const vEl = document.getElementById('currentVersion');
+    if (vEl) vEl.innerText = 'v' + ver;
+
+    // 繧｢繝・・繝・・繝育憾諷九・遒ｺ隱・(Background縺後メ繧ｧ繝・け縺励◆繧ゅ・)
+    chrome.storage.local.get(['update_available', 'latest_version'], (data) => {
+        if (data.update_available) {
+            showUpdateBanner(data.latest_version);
+        }
+    });
+
+    // 謇句虚繝√ぉ繝・け
+    const checkBtn = document.getElementById('checkUpdateBtn');
+    if (checkBtn) {
+        checkBtn.onclick = async (e) => {
+            e.preventDefault();
+            const statusEl = document.getElementById('updateStatus');
+            statusEl.innerText = "遒ｺ隱堺ｸｭ...";
+            
+            try {
+                const res = await fetch("https://raw.githubusercontent.com/TSS-extension/TSS---Text-to-Speak-Shosetu/main/manifest.json");
+                if (!res.ok) throw new Error("Network error");
+                const rData = await res.json();
+                
+                if (isNewer(rData.version, ver)) {
+                    showUpdateBanner(rData.version);
+                    statusEl.innerText = "譁ｰ繝舌・繧ｸ繝ｧ繝ｳ縺後≠繧翫∪縺呻ｼ・;
+                    statusEl.style.color = "#4CAF50";
+                    chrome.storage.local.set({ update_available: true, latest_version: rData.version });
+                } else {
+                    statusEl.innerText = "譛譁ｰ迚医〒縺吶・;
+                    statusEl.style.color = "#999";
+                    chrome.storage.local.remove(['update_available']);
+                    document.getElementById('update-banner').style.display = 'none';
+                }
+            } catch (err) {
+                statusEl.innerText = "騾壻ｿ｡繧ｨ繝ｩ繝ｼ";
+                statusEl.style.color = "#f44336";
+                console.error(err);
+            }
+        };
+    }
+});
+
+function showUpdateBanner(ver) {
+    const banner = document.getElementById('update-banner');
+    const vSpan = document.getElementById('new-version');
+    if (banner && vSpan) {
+        vSpan.innerText = 'v' + ver;
+        banner.style.display = 'block';
+    }
+}
+
+function isNewer(remote, local) {
+    const r = remote.split('.').map(Number);
+    const l = local.split('.').map(Number);
+    for (let i = 0; i < Math.max(r.length, l.length); i++) {
+        const rv = r[i] || 0;
+        const lv = l[i] || 0;
+        if (rv > lv) return true;
+        if (rv < lv) return false;
+    }
+    return false;
+}
